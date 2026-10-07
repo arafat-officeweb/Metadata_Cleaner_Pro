@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Metadata Cleaner Pro</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+body{font-family:Inter,system-ui,sans-serif;background:#f8fafc}
+.bar{transition:width .2s ease}
+.badge{font-size:.72rem;padding:.18rem .5rem;border-radius:999px;font-weight:700;display:inline-block;margin:.12rem}
+</style>
+</head>
+<body class="min-h-screen p-4 md:p-8 text-slate-800">
+<div class="max-w-6xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden">
+<header class="bg-slate-950 text-white p-6 md:p-8 text-center">
+<h1 class="text-2xl md:text-3xl font-bold">Metadata Cleaner Pro</h1>
+<p class="text-slate-300 mt-2 text-sm">Deep Detect • Maximum Clean • Auto Repair • Independent Verify • ZIP Export</p>
+</header>
+
+<main class="p-5 md:p-8 space-y-6">
+<div class="grid md:grid-cols-4 gap-3">
+<div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm"><b>JPEG/JPG</b><br>EXIF • GPS • XMP • IPTC • ICC • JFIF • APP/COM</div>
+<div class="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm"><b>PNG</b><br>eXIf • XMP • text • ICC • profile • resolution chunks</div>
+<div class="bg-cyan-50 border border-cyan-200 rounded-xl p-4 text-sm"><b>WebP</b><br>EXIF • XMP • ICC • RIFF metadata</div>
+<div class="bg-violet-50 border border-violet-200 rounded-xl p-4 text-sm"><b>Pro Verify</b><br>Detect before → clean → deep scan after</div>
+</div>
+
+<div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900 leading-6">
+<b>Important:</b> Pro cleans metadata stored in supported JPEG/PNG/WebP container structures without decoding/re-encoding image pixels.
+It does not remove visible watermarks or data embedded directly in pixels. Unsupported formats are reported instead of being falsely marked clean.
+</div>
+
+<label class="block cursor-pointer bg-indigo-50 border-2 border-dashed border-indigo-300 rounded-2xl p-9 text-center hover:bg-indigo-100">
+<div class="text-4xl mb-2">🧹</div>
+<div class="font-bold text-indigo-800 text-lg">Select image files</div>
+<div class="text-sm text-indigo-500 mt-1">JPG • JPEG • PNG • WebP</div>
+<input id="upload" type="file" multiple accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" class="hidden">
+</label>
+
+<div class="flex flex-wrap gap-3">
+<button id="process" disabled class="flex-1 min-w-[220px] bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl disabled:opacity-40">Deep Clean + Verify All</button>
+<button id="clear" class="px-6 bg-slate-200 hover:bg-slate-300 rounded-xl font-bold">Clear</button>
+</div>
+
+<div id="summary" class="hidden grid grid-cols-2 md:grid-cols-7 gap-2 text-center">
+<div class="bg-slate-50 rounded-lg p-3"><b id="total">0</b><small class="block">Total</small></div>
+<div class="bg-emerald-50 rounded-lg p-3"><b id="ok">0</b><small class="block">Success</small></div>
+<div class="bg-red-50 rounded-lg p-3"><b id="bad">0</b><small class="block">Failed</small></div>
+<div class="bg-blue-50 rounded-lg p-3"><b id="detected">0</b><small class="block">Detected Tags</small></div>
+<div class="bg-violet-50 rounded-lg p-3"><b id="removed">0</b><small class="block">Removed Tags</small></div>
+<div class="bg-orange-50 rounded-lg p-3"><b id="repaired">0</b><small class="block">Auto Repaired</small></div>
+<div class="bg-teal-50 rounded-lg p-3"><b id="verified">0</b><small class="block">Verified</small></div>
+</div>
+
+<div id="progressWrap" class="hidden">
+<div class="flex justify-between text-sm font-semibold mb-2"><span id="progressLabel">0 / 0</span><span id="percent">0%</span></div>
+<div class="h-4 bg-slate-200 rounded-full overflow-hidden"><div id="progress" class="bar h-full bg-indigo-600" style="width:0%"></div></div>
+</div>
+
+<div id="listWrap" class="hidden">
+<h2 class="font-bold mb-2">Deep Processing Report</h2>
+<div id="list" class="border rounded-xl divide-y max-h-[650px] overflow-auto"></div>
+</div>
+
+<a id="download" class="hidden block text-center bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-4 rounded-xl">Download Cleaned ZIP</a>
+
+<div class="text-xs text-slate-500 bg-slate-50 rounded-xl p-4 leading-6">
+<b>Scope:</b> Supported container metadata is removed and then independently scanned again.
+For HEIC/HEIF, AVIF, TIFF, GIF and other formats, this browser-only build does not pretend to have universal metadata support.
+</div>
+</main>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let files=[],oldURL=null;
+
+const CRC_TABLE=new Uint32Array(256);
+for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);CRC_TABLE[n]=c>>>0}
+function crc32(a){let c=0xffffffff;for(let i=0;i<a.length;i++)c=CRC_TABLE[(c^a[i])&255]^(c>>>8);return(c^0xffffffff)>>>0}
+function u32(a,o){return(((a[o]<<24)>>>0)|(a[o+1]<<16)|(a[o+2]<<8)|a[o+3])>>>0}
+function u16(a,o){return(a[o]<<8)|a[o+1]}
+function four(a,o){return String.fromCharCode(a[o],a[o+1],a[o+2],a[o+3])}
+function ascii(a,o,n){let s="";for(let i=0;i<n&&o+i<a.length;i++)s+=String.fromCharCode(a[o+i]);return s}
+function le32(a,o){return(a[o]|(a[o+1]<<8)|(a[o+2]<<16)|(a[o+3]<<24))>>>0}
+function putU32BE(out,n){out.push((n>>>24)&255,(n>>>16)&255,(n>>>8)&255,n&255)}
+function makePngChunk(type,data){
+ const t=new Uint8Array(4);for(let i=0;i<4;i++)t[i]=type.charCodeAt(i);
+ const td=new Uint8Array(4+data.length);td.set(t);td.set(data,4);
+ const out=[];putU32BE(out,data.length);out.push(...td);putU32BE(out,crc32(td));return out
+}
+function badge(t,cls){return '<span class="badge '+cls+'">'+t+'</span>'}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+/* ---------- JPEG DEEP SCAN ---------- */
+function scanJPEG(buf){
+ const d=new Uint8Array(buf);
+ if(d.length<4||d[0]!==255||d[1]!==216)throw Error("Invalid JPEG");
+ let i=2,sos=false,eoi=false,tags=[],segments=0;
+ while(i<d.length){
+  if(!sos){
+   if(d[i]!==255)throw Error("Invalid JPEG marker structure");
+   while(i<d.length&&d[i]===255)i++;
+   if(i>=d.length)break;
+   const m=d[i++];
+   if(m===217){eoi=true;break}
+   if(m===1||(m>=208&&m<=215))continue;
+   if(i+2>d.length)throw Error("Truncated JPEG segment");
+   const len=u16(d,i);if(len<2||i+len>d.length)throw Error("Invalid JPEG segment length");
+   const start=i-2,end=i+len;
+   if(m===218){sos=true;i=end;continue}
+   segments++;
+   if(m>=224&&m<=239){
+    let type="APP"+(m-224);
+    const p=i+2,n=Math.min(end,p+32);
+    const head=ascii(d,p,Math.max(0,n-p));
+    if(m===224&&head.startsWith("JFIF"))type="JFIF";
+    else if(m===224&&head.startsWith("JFXX"))type="JFXX";
+    else if(m===225&&head.startsWith("Exif\0\0"))type="EXIF";
+    else if(m===225&&(head.includes("http://ns.adobe.com/xap")||head.includes("http://ns.adobe.com")))type="XMP";
+    else if(m===226&&head.startsWith("ICC_PROFILE"))type="ICC";
+    else if(m===237&&head.includes("Photoshop"))type="IPTC/PHOTOSHOP";
+    else if(m===238&&head.includes("Ducky"))type="DUCKY";
+    else if(m===239&&head.includes("Adobe"))type="ADOBE";
+    tags.push({type,marker:"APP"+(m-224),size:len+2});
+   }else if(m===254)tags.push({type:"JPEG COMMENT",marker:"COM",size:len+2});
+   i=end;continue
+  }
+  if(d[i]!==255){i++;continue}
+  if(i+1>=d.length)break;
+  const n=d[i+1];
+  if(n===0){i+=2;continue}
+  if(n>=208&&n<=215){i+=2;continue}
+  if(n===217){eoi=true;break}
+  sos=false
+ }
+ if(!eoi)throw Error("JPEG missing EOI");
+ return {format:"JPEG",tags,segments}
+}
+
+/* ---------- PNG DEEP SCAN ---------- */
+function scanPNG(buf){
+ const d=new Uint8Array(buf),sig=[137,80,78,71,13,10,26,10];
+ if(d.length<33)throw Error("PNG too small");
+ for(let i=0;i<8;i++)if(d[i]!==sig[i])throw Error("Invalid PNG");
+ let p=8,tags=[],chunks=0,crcBad=0,iend=false,animated=false;
+ const meta=new Set(["tEXt","zTXt","iTXt","eXIf","iCCP","sRGB","gAMA","cHRM","sBIT","pHYs","bKGD","hIST","sPLT","tIME","oFFs","pCAL","sCAL","sTER"]);
+ while(p<d.length){
+  if(p+12>d.length)throw Error("Truncated PNG");
+  const len=u32(d,p),type=four(d,p+4);
+  if(len>0x7fffffff||p+12+len>d.length)throw Error("Invalid PNG chunk length");
+  const stored=u32(d,p+8+len),calc=crc32(d.subarray(p+4,p+8+len));
+  if(stored!==calc)crcBad++;
+  chunks++;
+  if(type==="acTL"||type==="fcTL"||type==="fdAT")animated=true;
+  if(meta.has(type))tags.push({type,size:len+12});
+  if(type==="IEND"){iend=true;p+=12;break}
+  p+=12+len;
+ }
+ if(!iend||p!==d.length)throw Error("Invalid PNG end structure");
+ if(animated)throw Error("APNG is not supported");
+ return {format:"PNG",tags,chunks,crcBad}
+}
+
+/* ---------- WEBP DEEP SCAN ---------- */
+function scanWebP(buf){
+ const d=new Uint8Array(buf);
+ if(d.length<12||ascii(d,0,4)!=="RIFF"||ascii(d,8,4)!=="WEBP")throw Error("Invalid WebP");
+ let p=12,tags=[],chunks=0,animated=false,hasImage=false;
+ while(p+8<=d.length){
+  const type=ascii(d,p,4),len=le32(d,p+4),total=8+len+(len&1);
+  if(p+total>d.length)throw Error("Truncated WebP chunk");
+  chunks++;
+  if(type==="EXIF")tags.push({type:"EXIF",size:len+8});
+  if(type==="XMP ")tags.push({type:"XMP",size:len+8});
+  if(type==="ICCP")tags.push({type:"ICC",size:len+8});
+  if(type==="ANIM"||type==="ANMF")animated=true;
+  if(type==="VP8 "||type==="VP8L"||type==="VP8X")hasImage=true;
+  p+=total;
+ }
+ if(p!==d.length||!hasImage)throw Error("Invalid WebP structure");
+ if(animated)throw Error("Animated WebP is not supported");
+ return {format:"WebP",tags,chunks}
+}
+
+function detect(buf){
+ const d=new Uint8Array(buf);
+ if(d.length>=2&&d[0]===255&&d[1]===216)return"jpeg";
+ if(d.length>=8&&d[0]===137&&d[1]===80&&d[2]===78&&d[3]===71)return"png";
+ if(d.length>=12&&ascii(d,0,4)==="RIFF"&&ascii(d,8,4)==="WEBP")return"webp";
+ throw Error("Unsupported image format")
+}
+
+/* ---------- JPEG CLEAN ---------- */
+function jpegClean(buf){
+ const d=new Uint8Array(buf),out=[255,216];
+ if(d.length<4||d[0]!==255||d[1]!==216)throw Error("Invalid JPEG signature");
+ let i=2,sos=false,eoi=false,removed=0;
+ while(i<d.length){
+  if(!sos){
+   if(d[i]!==255)throw Error("Invalid JPEG marker structure");
+   while(i<d.length&&d[i]===255)i++;
+   if(i>=d.length)break;
+   const m=d[i++];
+   if(m===217){out.push(255,217);eoi=true;break}
+   if(m===1||(m>=208&&m<=215)){out.push(255,m);continue}
+   if(i+2>d.length)throw Error("Truncated JPEG segment");
+   const len=u16(d,i);if(len<2||i+len>d.length)throw Error("Invalid JPEG segment length");
+   const start=i-2,end=i+len;
+   if(m===218){out.push(...d.subarray(start,end));i=end;sos=true;continue}
+   const metadata=(m>=224&&m<=239)||m===254;
+   if(metadata){removed++;i=end;continue}
+   out.push(...d.subarray(start,end));i=end;continue
+  }
+  if(d[i]!==255){out.push(d[i++]);continue}
+  if(i+1>=d.length)throw Error("Truncated JPEG scan");
+  const n=d[i+1];
+  if(n===0){out.push(255,0);i+=2;continue}
+  if(n>=208&&n<=215){out.push(255,n);i+=2;continue}
+  if(n===217){out.push(255,217);i+=2;eoi=true;break}
+  sos=false
+ }
+ if(!eoi)throw Error("JPEG missing EOI");
+ return {buffer:new Uint8Array(out).buffer,removed,repaired:0}
+}
+
+/* ---------- PNG CLEAN / REBUILD CRC ---------- */
+function pngClean(buf){
+ const d=new Uint8Array(buf),sig=[137,80,78,71,13,10,26,10];
+ if(d.length<33)throw Error("PNG too small");
+ for(let i=0;i<8;i++)if(d[i]!==sig[i])throw Error("Invalid PNG signature");
+ const out=[...sig];let p=8,ihdr=false,idat=false,iend=false,plte=false,trns=false,seenIDAT=false,colorType=null,removed=0,repaired=0;
+ while(p<d.length){
+  if(p+12>d.length)throw Error("Truncated PNG chunk");
+  const len=u32(d,p),type=four(d,p+4);
+  if(len>0x7fffffff||p+12+len>d.length)throw Error("Invalid PNG chunk length");
+  const data=new Uint8Array(d.subarray(p+8,p+8+len));
+  const stored=u32(d,p+8+len),calc=crc32(d.subarray(p+4,p+8+len));
+  if(!ihdr){
+   if(type!=="IHDR"||len!==13)throw Error("Invalid first IHDR");
+   const w=u32(d,p+8),h=u32(d,p+12);if(!w||!h)throw Error("Invalid dimensions");
+   colorType=d[p+17];ihdr=true
+  }
+  if(type==="acTL"||type==="fcTL"||type==="fdAT")throw Error("APNG is not supported");
+  if(type==="PLTE"){if(seenIDAT||plte)throw Error("Invalid PLTE order");plte=true}
+  if(type==="tRNS"){if(seenIDAT||trns)throw Error("Invalid tRNS order");trns=true}
+  if(type==="IDAT"){idat=true;seenIDAT=true}
+  if(type==="IEND"){
+   if(len!==0||!idat)throw Error("Invalid IEND");
+   out.push(...makePngChunk("IEND",new Uint8Array(0)));iend=true;p+=12;break
+  }
+  const keep=type==="IHDR"||type==="PLTE"||type==="IDAT"||type==="tRNS";
+  if(keep){
+   out.push(...makePngChunk(type,data));
+   if(stored!==calc)repaired++
+  }else removed++;
+  p+=12+len
+ }
+ if(!iend||p!==d.length)throw Error("Invalid PNG ending");
+ if(colorType===3&&!plte)throw Error("Indexed PNG missing PLTE");
+ return {buffer:new Uint8Array(out).buffer,removed,repaired}
+}
+
+/* ---------- WEBP CLEAN ---------- */
+function webpClean(buf){
+ const d=new Uint8Array(buf);
+ if(d.length<12||ascii(d,0,4)!=="RIFF"||ascii(d,8,4)!=="WEBP")throw Error("Invalid WebP");
+ let p=12,parts=[],removed=0,animated=false,hasImage=false;
+ while(p+8<=d.length){
+  const type=ascii(d,p,4),len=le32(d,p+4),total=8+len+(len&1);
+  if(p+total>d.length)throw Error("Truncated WebP");
+  if(type==="ANIM"||type==="ANMF")animated=true;
+  if(type==="VP8 "||type==="VP8L"||type==="VP8X")hasImage=true;
+  parts.push({type,p,len,total});p+=total
+ }
+ if(p!==d.length||!hasImage)throw Error("Invalid WebP structure");
+ if(animated)throw Error("Animated WebP is not supported");
+ const kept=parts.filter(c=>{if(c.type==="EXIF"||c.type==="XMP "||c.type==="ICCP"){removed++;return false}return true});
+ const out=[82,73,70,70,0,0,0,0,87,69,66,80];let payload=4;for(const c of kept)payload+=c.total;
+ out[4]=payload&255;out[5]=(payload>>>8)&255;out[6]=(payload>>>16)&255;out[7]=(payload>>>24)&255;
+ const has=t=>kept.some(c=>c.type===t);
+ for(const c of kept){
+  let arr=Array.from(d.subarray(c.p,c.p+c.total));
+  if(c.type==="VP8X"&&c.len>=1){
+   let flags=arr[8];
+   if(!has("ICCP"))flags&=~(1<<5);
+   if(!has("EXIF"))flags&=~(1<<3);
+   if(!has("XMP "))flags&=~(1<<2);
+   arr[8]=flags
+  }
+  out.push(...arr)
+ }
+ return {buffer:new Uint8Array(out).buffer,removed,repaired:0}
+}
+
+function deepScan(buf){
+ const k=detect(buf);
+ return k==="jpeg"?scanJPEG(buf):k==="png"?scanPNG(buf):scanWebP(buf)
+}
+function clean(buf){
+ const k=detect(buf);
+ return k==="jpeg"?jpegClean(buf):k==="png"?pngClean(buf):webpClean(buf)
+}
+function safeName(n,set){
+ const dot=n.lastIndexOf("."),base=dot>0?n.slice(0,dot):n,ext=dot>0?n.slice(dot+1):"jpg";
+ let x="cleaned_"+base+"."+ext,c=1;
+ while(set.has(x.toLowerCase()))x="cleaned_"+base+"_"+c+++"."+ext;
+ set.add(x.toLowerCase());return x
+}
+
+function tagsHTML(tags){
+ if(!tags.length)return '<span class="text-emerald-600 font-semibold">NONE detected</span>';
+ const map={EXIF:"bg-red-100 text-red-700",XMP:"bg-violet-100 text-violet-700",ICC:"bg-blue-100 text-blue-700",JFIF:"bg-slate-200 text-slate-700",JFXX:"bg-slate-200 text-slate-700","IPTC/PHOTOSHOP":"bg-orange-100 text-orange-700","JPEG COMMENT":"bg-yellow-100 text-yellow-700",eXIf:"bg-red-100 text-red-700",iCCP:"bg-blue-100 text-blue-700",tEXt:"bg-yellow-100 text-yellow-700",zTXt:"bg-yellow-100 text-yellow-700",iTXt:"bg-violet-100 text-violet-700",pHYs:"bg-slate-200 text-slate-700",tIME:"bg-yellow-100 text-yellow-700",sRGB:"bg-blue-100 text-blue-700",gAMA:"bg-blue-100 text-blue-700",cHRM:"bg-blue-100 text-blue-700"};
+ return [...new Set(tags.map(x=>x.type))].map(x=>badge(esc(x),map[x]||"bg-slate-100 text-slate-700")).join(" ")
+}
+
+function addRow(file,i){
+ const row=document.createElement("div");row.className="p-4";
+ row.innerHTML='<div class="flex gap-3 items-center"><div class="flex-1 min-w-0"><b class="block truncate">'+esc(file.name)+'</b><small class="text-slate-500">'+(file.size/1024).toFixed(1)+' KB</small></div><span id="st'+i+'" class="text-sm font-semibold text-slate-500">Waiting</span></div><div id="detail'+i+'" class="mt-3 hidden"></div>';
+ $("list").append(row)
+}
+
+$("upload").onchange=e=>{
+ files=[...e.target.files];$("process").disabled=!files.length;
+ $("summary").classList.toggle("hidden",!files.length);$("listWrap").classList.toggle("hidden",!files.length);
+ $("list").innerHTML="";files.forEach(addRow);$("total").textContent=files.length;
+ $("download").classList.add("hidden");$("progressWrap").classList.add("hidden")
+}
+
+$("clear").onclick=()=>{
+ if(oldURL){URL.revokeObjectURL(oldURL);oldURL=null}
+ files=[];$("upload").value="";$("process").disabled=true;$("list").innerHTML="";
+ ["summary","listWrap","progressWrap","download"].forEach(x=>$(x).classList.add("hidden"));
+ $("progress").style.width="0%"
+}
+
+$("process").onclick=async()=>{
+ if(!files.length)return;
+ $("process").disabled=true;$("progressWrap").classList.remove("hidden");$("download").classList.add("hidden");
+ const zip=new JSZip(),folder=zip.folder("Cleaned_Images"),used=new Set();
+ let ok=0,bad=0,detected=0,removed=0,repaired=0,verified=0;
+
+ for(let i=0;i<files.length;i++){
+  const st=$("st"+i),detail=$("detail"+i);
+  st.textContent="Deep scanning…";st.className="text-sm font-semibold text-indigo-600";
+  try{
+   const original=await files[i].arrayBuffer();
+   const before=deepScan(original);
+   detected+=before.tags.length;
+
+   let result=clean(original);
+   let after=deepScan(result.buffer);
+
+   if(after.tags.length!==0){
+    result=clean(result.buffer);
+    after=deepScan(result.buffer)
+   }
+   if(after.tags.length!==0)throw Error("Remaining supported metadata: "+after.tags.map(x=>x.type).join(", "));
+
+   folder.file(safeName(files[i].name,used),result.buffer);
+   ok++;verified++;removed+=result.removed;repaired+=result.repaired;
+
+   const beforeText=tagsHTML(before.tags);
+   const afterText=after.tags.length?tagsHTML(after.tags):'<span class="text-emerald-600 font-semibold">0 — CLEAN</span>';
+   detail.classList.remove("hidden");
+   detail.innerHTML='<div class="bg-slate-50 rounded-xl p-3 text-sm leading-7">'+
+    '<div><b>Format:</b> '+before.format+'</div>'+
+    '<div><b>Detected metadata:</b> '+beforeText+'</div>'+
+    '<div><b>Removed:</b> '+(before.tags.length?tagsHTML(before.tags):'<span class="text-slate-500">No supported metadata detected</span>')+'</div>'+
+    '<div><b>Remaining after deep scan:</b> '+afterText+'</div>'+
+    '<div><b>Auto repair:</b> '+(result.repaired?'YES':'No')+'</div></div>';
+   st.textContent="✓ Cleaned + Deep Verified";st.className="text-sm font-semibold text-emerald-600"
+  }catch(err){
+   bad++;st.textContent="✕ "+(err.message||"Failed");st.className="text-sm font-semibold text-red-600";
+   detail.classList.remove("hidden");detail.innerHTML='<div class="bg-red-50 text-red-700 rounded-xl p-3 text-sm"><b>Safe failure:</b> '+esc(err.message||"Unable to clean safely")+'</div>'
+  }
+
+  const pct=Math.round(((i+1)/files.length)*100);
+  $("progress").style.width=pct+"%";$("percent").textContent=pct+"%";$("progressLabel").textContent=(i+1)+" / "+files.length;
+  $("ok").textContent=ok;$("bad").textContent=bad;$("detected").textContent=detected;$("removed").textContent=removed;$("repaired").textContent=repaired;$("verified").textContent=verified;
+  await new Promise(r=>setTimeout(r,0))
+ }
+
+ if(ok){
+  try{
+   const blob=await zip.generateAsync({type:"blob",compression:"STORE"});
+   if(oldURL)URL.revokeObjectURL(oldURL);
+   oldURL=URL.createObjectURL(blob);
+   const a=$("download");a.href=oldURL;a.download="Metadata_Cleaner_Pro_"+Date.now()+".zip";a.classList.remove("hidden");
+   $("process").textContent="✓ Finished — Download ZIP"
+  }catch(e){$("process").textContent="ZIP generation failed"}
+ }else $("process").textContent="No valid files could be safely cleaned"
+}
+</script>
+</body>
+</html>
